@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""                          _              _                           
-  _ __   ___ _   _ _ __ __ _| |   ___ _ __ | |__   __ _ _ __   ___ ___  
- | '_ \ / _ \ | | | '__/ _` | |  / _ \ '_ \| '_ \ / _` | '_ \ / __/ _ \ 
- | | | |  __/ |_| | | | (_| | | |  __/ | | | | | | (_| | | | | (_|  __/ 
- |_| |_|\___|\__,_|_|  \__,_|_|  \___|_| |_|_| |_|\__,_|_| |_|\___\___| 
+"""                          _              _
+  _ __   ___ _   _ _ __ __ _| |   ___ _ __ | |__   __ _ _ __   ___ ___
+ | '_ \ / _ \ | | | '__/ _` | |  / _ \ '_ \| '_ \ / _` | '_ \ / __/ _ \
+ | | | |  __/ |_| | | | (_| | | |  __/ | | | | | | (_| | | | | (_|  __/
+ |_| |_|\___|\__,_|_|  \__,_|_|  \___|_| |_|_| |_|\__,_|_| |_|\___\___|
 
 """
 #
@@ -59,7 +59,7 @@ add_arg('--learning-decay', default=0.5, type=float, help='How much to decay the
 add_arg('--generator-upscale', default=2, type=int, help='Steps of 2x up-sampling as post-process.')
 add_arg('--generator-downscale', default=0, type=int, help='Steps of 2x down-sampling as preprocess.')
 add_arg('--generator-filters', default=[64], nargs='+', type=int, help='Number of convolution units in network.')
-add_arg('--generator-blocks', default=6, type=int, help='Number of residual blocks per iteration.')
+add_arg('--generator-blocks', default=4, type=int, help='Number of residual blocks per iteration.')
 add_arg('--generator-residual', default=2, type=int, help='Number of layers in a residual block.')
 add_arg('--perceptual-layer', default='conv2_2', type=str, help='Which VGG layer to use as loss component.')
 add_arg('--perceptual-weight', default=1e0, type=float, help='Weight for VGG-layer perceptual loss.')
@@ -301,7 +301,7 @@ class Model(object):
             self.setup_discriminator()
         self.load_generator(params)
         self.compile()
-        print("network: ", self.network)
+        print("network: ",self.network)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Network Configuration
@@ -316,11 +316,20 @@ class Model(object):
         prelu = lasagne.layers.ParametricRectifierLayer(conv, alpha=lasagne.init.Constant(alpha))
         self.network[name + 'x'] = conv
         self.network[name + '>'] = prelu
+        # print('input for make_layer shape: ', input.shape)
+        # print('units for make_layer: ',units)
+        # print('kernal: ',filter_size)
+        # print('padding: ',pad)
+        # print('make_layer output: ', prelu)
         return prelu
 
     def make_block(self, name, input, units):
         self.make_layer(name + '-A', input, units, alpha=0.1)
+        # print('input for make_block shape: ', input.shape)
+        # print('units for make_block: ',units)
+        # self.make_layer(name+'-B', self.last_layer(), units, alpha=1.0)
         return ElemwiseSumLayer([input, self.last_layer()]) if args.generator_residual else self.last_layer()
+
 
     def make_recursive_block(self, name, input, units=128, filter_size=(3, 3), stride=(1, 1), pad=(1, 1), res_blocks=9):
         residual = input
@@ -342,32 +351,33 @@ class Model(object):
 
         return out
 
-    def setup_generator(self, input, config):
-        for k, v in config.items(): setattr(args, k, v)
 
+    def setup_generator(self, input, config):
+        # print('setup generator :D')
+        for k, v in config.items(): setattr(args, k, v)
+        # print('k: ',k)
+        # print('v: ',v)
         args.zoom = 2 ** (args.generator_upscale - args.generator_downscale)
+        # print('zoom: ',args.zoom)
         units_iter = extend(args.generator_filters)
+        # print('units_iter: ',units_iter)
         units = next(units_iter)
         self.make_layer('iter.0', input, units, filter_size=(7, 7), pad=(3, 3))
 
         for i in range(0, args.generator_downscale):
             self.make_layer('downscale%i' % i, self.last_layer(), next(units_iter), filter_size=(4, 4), stride=(2, 2))
 
-        x = self.last_layer()
         units = next(units_iter)
-        for i in range(0, args.generator_blocks):
-            # print('i =%i ' %i)
-            self.make_recursive_block('iter.%i' % (i + 1), x, res_blocks=9)
-            x = lasagne.layers.rrelu(x)
+        # for i in range(0, args.generator_blocks):
+        #     self.make_block('iter.%i' % (i + 1), self.last_layer(), units)
+
+        self.make_recursive_block('recursive block1', self.last_layer(), units)
+        self.make_recursive_block('recursive block2', self.last_layer(), units)
 
         for i in range(0, args.generator_upscale):
             u = next(units_iter)
-            print('i =%i ' % i)
-            # self.make_layer('upscale%i.2' % i, self.last_layer(), u * 4)
-            self.make_recursive_block('upscale%i.2' % i, x, res_blocks=1)
-            x = lasagne.layers.rrelu(x)
-            self.network['upscale%i.1' % i] = SubpixelReshuffleLayer(x, u, 2)
-            x = self.last_layer()
+            self.make_layer('upscale%i.2' % i, self.last_layer(), u * 4)
+            self.network['upscale%i.1' % i] = SubpixelReshuffleLayer(self.last_layer(), u, 2)
 
         self.network['out'] = ConvLayer(self.last_layer(), 3, filter_size=(7, 7), pad=(3, 3), nonlinearity=None)
 
@@ -482,7 +492,7 @@ class Model(object):
             if args.train: return {}, {}
             error("Model file with pre-trained convolution layers not found. Download it here...",
                   "https://github.com/alexjc/neural-enhance/releases/download/v%s/%s" % (
-                      __version__, self.get_filename()))
+                  __version__, self.get_filename()))
         print('  - Loaded file `{}` with trained model.'.format(self.get_filename()))
         return pickle.load(bz2.open(self.get_filename(absolute=True), 'rb'))
 
