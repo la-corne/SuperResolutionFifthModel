@@ -322,8 +322,6 @@ class Model(object):
         self.make_layer(name + '-A', input, units, alpha=0.1)
         return ElemwiseSumLayer([input, self.last_layer()]) if args.generator_residual else self.last_layer()
 
-
-
     def make_recursive_block(self, name, input, units=128, filter_size=(3, 3), stride=(1, 1), pad=(1, 1), res_blocks=9):
         residual = input
         input = ConvLayer(input, units, filter_size, stride=stride, pad=pad, nonlinearity=None)
@@ -359,18 +357,17 @@ class Model(object):
         units = next(units_iter)
         for i in range(0, args.generator_blocks):
             # print('i =%i ' %i)
-            self.make_recursive_block('iter.%i' % (i + 1), x)
+            self.make_recursive_block('iter.%i' % (i + 1), x, res_blocks=9)
             x = lasagne.layers.rrelu(x)
-
 
         for i in range(0, args.generator_upscale):
             u = next(units_iter)
             print('i =%i ' % i)
-            #self.make_layer('upscale%i.2' % i, self.last_layer(), u * 4)
-            self.make_recursive_block('upscale%i.2' % i, x)
+            # self.make_layer('upscale%i.2' % i, self.last_layer(), u * 4)
+            self.make_recursive_block('upscale%i.2' % i, x, res_blocks=1)
             x = lasagne.layers.rrelu(x)
             self.network['upscale%i.1' % i] = SubpixelReshuffleLayer(x, u, 2)
-            x= self.last_layer()
+            x = self.last_layer()
 
         self.network['out'] = ConvLayer(self.last_layer(), 3, filter_size=(7, 7), pad=(3, 3), nonlinearity=None)
 
